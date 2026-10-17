@@ -5,6 +5,20 @@
 A browser-based interactive graphics project that combines computer vision, gesture recognition, and particle animation. Using a webcam, users can control the behavior of a glowing particle system through natural hand movements.
 
 Built with **HTML5, CSS3, JavaScript, Canvas API, and MediaPipe Hands**.
+## 📸 Project Gallery
+
+### 🖐️ Open Palm — Repulsor Mode
+
+![Open palm gesture — Repulsor mode](open-palm.png)
+
+### ✊ Closed Fist — Black Hole Mode
+
+![Closed fist gesture — Black Hole mode](closed-fist.png)
+
+### 🤏 Pinch — Quantum Swirl Mode
+
+![Pinch gesture — Quantum Swirl mode](pinch.png)
+
 
 ## ✨ Features
 
