@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Quantum Forcefield</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      background-color: #030305;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: white;
+    }
+    
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      transform: scaleX(-1); /* Mirror camera */
+    }
+
+    video { display: none; }
+
+    /* UI Overlay */
+    .glass-panel {
+      position: absolute;
+      background: rgba(15, 15, 20, 0.5);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      z-index: 10;
+    }
+
+    #stats-panel {
+      top: 20px;
+      left: 20px;
+      width: 260px;
+    }
+
+    #guide-panel {
+      top: 20px;
+      right: 20px;
+      width: 300px;
+    }
+
+    .ui-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .ui-value { font-weight: bold; }
+    
+    /* Dynamic Mode Colors */
+    .mode-idle { color: #888888; }
+    .mode-repulsor { color: #00ffff; text-shadow: 0 0 8px #00ffff; }
+    .mode-blackhole { color: #ff0055; text-shadow: 0 0 8px #ff0055; }
+    .mode-swirl { color: #ffaa00; text-shadow: 0 0 8px #ffaa00; }
+    .mode-stasis { color: #aaaaff; text-shadow: 0 0 8px #aaaaff; }
+
+    .guide-item {
+      margin-bottom: 15px;
+      font-size: 13px;
+      line-height: 1.4;
+      color: #cccccc;
+    }
+    .guide-title {
+      font-weight: bold;
+      color: #ffffff;
+      display: block;
+      margin-bottom: 4px;
+      letter-spacing: 1px;
+    }
+
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 20px;
+      letter-spacing: 3px;
+      color: #00ffff;
+      text-shadow: 0 0 10px #00ffff;
+      z-index: 20;
+    }
+  </style>
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+  <div id="loading">CALIBRATING GESTURE ENGINE...</div>
+  
+  <div id="stats-panel" class="glass-panel">
+    <div class="ui-row"><span>Engine:</span> <span class="ui-value">Quantum v3.0</span></div>
+    <div class="ui-row"><span>FPS:</span> <span id="fps-counter" class="ui-value">0</span></div>
+    <div class="ui-row"><span>Particles:</span> <span class="ui-value">150</span></div>
+    <div class="ui-row" style="margin-top: 20px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+      <span>Active Mode:</span> <span id="mode-status" class="ui-value mode-idle">IDLE</span>
+    </div>
+  </div>
+
+  <div id="guide-panel" class="glass-panel">
+    <div style="font-size: 16px; font-weight: bold; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 10px;">GESTURE GUIDE</div>
+    
+    <div class="guide-item">
+      <span class="guide-title mode-repulsor">🖐️ OPEN PALM : REPULSOR</span>
+      Push particles away radially.
+    </div>
+    <div class="guide-item">
+      <span class="guide-title mode-blackhole">✊ CLOSED FIST : BLACK HOLE</span>
+      Suck all particles into a dense singularity.
+    </div>
+    <div class="guide-item">
+      <span class="guide-title mode-swirl">🤏 PINCH : QUANTUM SWIRL</span>
+      Touch index and thumb to create a swirling galaxy orbit.
+    </div>
+    <div class="guide-item">
+      <span class="guide-title mode-stasis">✌️ PEACE SIGN : STASIS</span>
+      Index and middle finger up to instantly freeze time.
+    </div>
+  </div>
+
+  <video class="input_video" autoplay playsinline></video>
+  <canvas class="output_canvas"></canvas>
+
+  <script>
+    const videoElement = document.querySelector('.input_video');
+    const canvas = document.querySelector('.output_canvas');
+    const ctx = canvas.getContext('2d');
+    
+    let particles = [];
+    const particleCount = 150; // Optimized for 60fps tracking
+    
+    let activeHands = [];
+    let currentMode = 'IDLE';
+
+    let lastTime = 0;
+    let frames = 0;
+
+    class Particle {
+      constructor() {
+        this.x = Math.random() * canvas.width;
+        this.y = Math.random() * canvas.height;
+        this.vx = (Math.random() - 0.5) * 2;
+        this.vy = (Math.random() - 0.5) * 2;
+        this.size = Math.random() * 2 + 1;
+        this.color = "#888888";
+      }
+
+      update() {
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Screen wrap
+        if (this.x < 0) this.x = canvas.width;
+        if (this.x > canvas.width) this.x = 0;
+        if (this.y < 0) this.y = canvas.height;
+        if (this.y > canvas.height) this.y = 0;
+
+        let totalForceX = 0;
+        let totalForceY = 0;
+        let targetColor = "#00ffff"; // Default idle cyan
+
+        for (let hand of activeHands) {
+          let dx = hand.x - this.x;
+          let dy = hand.y - this.y;
+          let distance = Math.sqrt(dx * dx + dy * dy);
+          let maxDistance = 400; 
+
+          if (distance < maxDistance) {
+            let force = (maxDistance - distance) / maxDistance;
+            let dirX = dx / distance;
+            let dirY = dy / distance;
+
+            if (hand.mode === 'REPULSOR') {
+              totalForceX -= dirX * force * 5;
+              totalForceY -= dirY * force * 5;
+              targetColor = "#00ffff";
+            } 
+            else if (hand.mode === 'BLACK_HOLE') {
+              totalForceX += dirX * force * 15; // Strong pull
+              totalForceY += dirY * force * 15;
+              targetColor = "#ff0055";
+            }
+            else if (hand.mode === 'SWIRL') {
+              // Tangential force for orbiting
+              totalForceX += (dirX * force * 3) - (dirY * force * 8);
+              totalForceY += (dirY * force * 3) + (dirX * force * 8);
+              targetColor = "#ffaa00";
+            }
+          }
+          
+          if (hand.mode === 'STASIS') {
+            this.vx *= 0.1; // Extreme damping (Freeze)
+            this.vy *= 0.1;
+            targetColor = "#aaaaff";
+          }
+        }
+
+        // Apply forces
+        this.vx += totalForceX;
+        this.vy += totalForceY;
+
+        // CONTINUOUS FRICTION (Stops drifting when hands stop)
+        this.vx *= 0.92;
+        this.vy *= 0.92;
+
+        // Base drift if totally idle
+        if (Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1) {
+          this.vx += (Math.random() - 0.5) * 0.2;
+          this.vy += (Math.random() - 0.5) * 0.2;
+        }
+
+        this.color = targetColor;
+      }
+
+      draw() {
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+      }
+    }
+
+    function initParticles() {
+      particles = [];
+      for (let i = 0; i < particleCount; i++) particles.push(new Particle());
+    }
+
+    // Math helper for gestures
+    function getDistance(p1, p2) {
+      return Math.sqrt(Math.pow(p1.x - p2.x, 2) + Math.pow(p1.y - p2.y, 2));
+    }
+
+    function animate(timestamp) {
+      if (timestamp - lastTime >= 1000) {
+        document.getElementById('fps-counter').innerText = frames;
+        frames = 0;
+        lastTime = timestamp;
+      }
+      frames++;
+
+      if (canvas.width !== window.innerWidth || canvas.height !== window.innerHeight) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        initParticles();
+      }
+
+      // Smooth motion blur trail
+      ctx.fillStyle = 'rgba(3, 3, 5, 0.25)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Update and draw particles & networks
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < particles.length; i++) {
+        particles[i].update();
+        particles[i].draw();
+
+        for (let j = i; j < particles.length; j++) {
+          let dx = particles[i].x - particles[j].x;
+          let dy = particles[i].y - particles[j].y;
+          let distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < 90) {
+            ctx.beginPath();
+            ctx.strokeStyle = particles[i].color;
+            ctx.globalAlpha = 1 - distance / 90;
+            ctx.moveTo(particles[i].x, particles[i].y);
+            ctx.lineTo(particles[j].x, particles[j].y);
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+          }
+        }
+      }
+
+      // Draw Hand UI FX
+      activeHands.forEach(hand => {
+        ctx.beginPath();
+        ctx.arc(hand.x, hand.y, 40, 0, Math.PI * 2);
+        ctx.strokeStyle = hand.mode === 'BLACK_HOLE' ? '#ff0055' : 
+                          hand.mode === 'SWIRL' ? '#ffaa00' : 
+                          hand.mode === 'STASIS' ? '#aaaaff' : '#00ffff';
+        ctx.lineWidth = 2;
+        if(hand.mode !== 'IDLE') ctx.stroke();
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    // AI Gesture Recognition
+    function onResults(results) {
+      document.getElementById('loading').style.display = 'none';
+      activeHands = [];
+      let detectedMode = 'IDLE';
+
+      if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+        for (const landmarks of results.multiHandLandmarks) {
+          
+          const wrist = landmarks[0];
+          
+          // Check if fingers are extended (Tip is further from wrist than base joint)
+          const indexUp = getDistance(landmarks[8], wrist) > getDistance(landmarks[5], wrist) * 1.3;
+          const middleUp = getDistance(landmarks[12], wrist) > getDistance(landmarks[9], wrist) * 1.3;
+          const ringUp = getDistance(landmarks[16], wrist) > getDistance(landmarks[13], wrist) * 1.3;
+          const pinkyUp = getDistance(landmarks[20], wrist) > getDistance(landmarks[17], wrist) * 1.3;
+          
+          // Pinch distance between Thumb tip (4) and Index tip (8)
+          const pinchDist = getDistance(landmarks[4], landmarks[8]);
+          
+          let mode = 'IDLE';
+          let fxX = landmarks[9].x * canvas.width; // Default effect center is palm
+          let fxY = landmarks[9].y * canvas.height;
+
+          // Gesture Logic Tree
+          if (pinchDist < 0.05) {
+            mode = 'SWIRL';
+            fxX = ((landmarks[4].x + landmarks[8].x) / 2) * canvas.width; // Swirl from fingertips
+            fxY = ((landmarks[4].y + landmarks[8].y) / 2) * canvas.height;
+          } 
+          else if (indexUp && middleUp && !ringUp && !pinkyUp) {
+            mode = 'STASIS';
+          } 
+          else if (indexUp && middleUp && ringUp && pinkyUp) {
+            mode = 'REPULSOR';
+          } 
+          else if (!indexUp && !middleUp && !ringUp && !pinkyUp) {
+            mode = 'BLACK_HOLE';
+          }
+
+          detectedMode = mode;
+          activeHands.push({ x: fxX, y: fxY, mode: mode });
+        }
+      }
+
+      // Update UI Panel
+      const modeUI = document.getElementById('mode-status');
+      modeUI.innerText = detectedMode;
+      modeUI.className = `ui-value mode-${detectedMode.toLowerCase().replace('_', '')}`;
+    }
+
+    // Init Canvas & Physics
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    initParticles();
+    requestAnimationFrame(animate);
+
+    // Init MediaPipe AI
+    const hands = new Hands({locateFile: (file) => {
+      return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+    }});
+    
+    hands.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 1,
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7
+    });
+    hands.onResults(onResults);
+
+    const camera = new Camera(videoElement, {
+      onFrame: async () => { await hands.send({image: videoElement}); },
+      width: 640, // Lower res camera feed drastically improves performance
+      height: 480
+    });
+    camera.start();
+  </script>
+</body>
+</html>
